@@ -21,8 +21,8 @@
 #define STRING_BUFFER_SIZE (1000)
 #define DC_HISTORY_COUNT (20)  // DC Report Array Length
 
-#define LOG_INTERVAL_MIN (60)  // SD card logging time interval (minute)
-#define DCR_INTERVAL_SEC (10)  // SD card text dc report interval (sec)
+#define LOG_INTERVAL_MIN (2)  // SD card logging time interval (minute)
+#define DCR_INTERVAL_SEC (15)  // SD card text dc report interval (sec)
 
 /* Global Instances */
 
@@ -288,6 +288,8 @@ String getDCContent() {
 void setup() {
   /* Initialize Serial */
   Serial.begin(SERIAL_BAUDRATE);
+  /*  */
+  Serial2.begin(SERIAL_BAUDRATE);
 
   /* Demo Button : LTE Extension Board: D03 */
   pinMode(PIN_D03, INPUT_PULLUP);
@@ -332,6 +334,8 @@ void setup() {
     Gnss.getNavData(&NavData);  // blocking
   }
   mainboard_start_min = NavData.time.minute;
+  Serial.print("Mainboard Start min = ");
+  Serial.println(mainboard_start_min);
   location_flag = 0;
   localtime_flag = 0;
   newfile_flag = 1;
@@ -407,13 +411,14 @@ void loop() {
   }
 
   // SD card writting section
-  if ((((NavData.time.minute + mainboard_start_min + 1) % LOG_INTERVAL_MIN) == 0) && localtime_flag && newfile_flag) {
+  if ((((NavData.time.minute + mainboard_start_min) % LOG_INTERVAL_MIN) == 0) && localtime_flag && newfile_flag) {
     Serial.println("Enter Newfile section: NF");
     String temp_ = getSatRTCDateTime(&NavData);  // datetime as a filename
+    Serial.println(temp_);
     //String temp_ = getSatUTCDatetime(&NavData);
     // capture & save image
     camCapture();
-    sleep(2);
+    sleep(1);
     filename_image = "image_" + temp_ + ".jpg";
     strcpy(filename, filename_image.c_str());
     saveImg(filename);
@@ -426,6 +431,7 @@ void loop() {
     strcpy(dc_data, temp_.c_str());
     saveText(filename, dc_data);
     strcpy(dc_data, getSatLocation(&NavData).c_str());
+    Serial.println(dc_data);
     saveText(filename, dc_data);
     Serial.println("Report created");
 

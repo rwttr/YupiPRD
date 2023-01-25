@@ -1,5 +1,7 @@
-import Pkg
-Pkg.activate(".");
+module WierDetector
+
+#import Pkg
+#Pkg.activate(".");
 
 using ArgParse
 using FileIO
@@ -10,6 +12,8 @@ using Statistics
 
 import ImageView
 
+global image_height::Int
+global image_width::Int
 
 function parse_cli()
     s = ArgParseSettings()
@@ -30,10 +34,12 @@ function parse_cli()
     return parse_args(s)
 end
 
-
+#input_dir = "input_data"
+#output_dir = "output_data"
 # load a recent image 
+
 function generate_filename()
-    file_list = readdir(".//input_data");
+    file_list = readdir(input_dir);
     # list all data file
     # vector of string is sorted, ascending
     if (file_list |> length == 0)
@@ -44,7 +50,7 @@ function generate_filename()
         # indx_report = findall(x -> occursin("report", x), file_list)[end]
 
         ## load image
-        img_filename = joinpath("input_data/", file_list[indx_image])
+        img_filename = joinpath(input_dir, file_list[indx_image])
     end
     return img_filename
 end
@@ -57,7 +63,8 @@ function process_image(img_filename)
     # ImageView.imshow(img)
 
     # image size
-    img_height, img_width = size(img)
+    global img_height = size(img)[1]
+    global img_width = size(img)[2]
 
     # preprocess, permute dims to W x H x Channel
     img_copy = Images.channelview(img) |> copy # Channel x W x H 
@@ -85,10 +92,19 @@ function process_image(img_filename)
 
 end
 
-
-function main()
+function julia_main()::Cint
     @show parsed_args = parse_cli()
     show_img_flag = parsed_args["s"]
     filename_flag = parsed_args["f"]
     info_flag = parsed_args["v"]
+
+    filename = generate_filename();
+    process_image(filename);
+    return 0;
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    julia_main()
+end
+
 end
