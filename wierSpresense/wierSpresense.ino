@@ -14,6 +14,21 @@
 #include <gpsutils/cxd56_gnss_nmea.h>
 #include "QZQSM_EN.h"
 
+// ===========================================
+// * ESP8266
+#include "ESP8266.h"
+
+#define SSID "YuPiTeam"
+#define PASSWORD "12345678"
+#define HOST_NAME "192.168.4.3"
+#define HOST_PORT_SECTION (5000)
+#define HOST_PORT_SATT (5002)
+#define HOST_PORT_CAPTURE (5003)
+#define HOST_PORT_LOCATION (5004)
+
+ESP8266 wifi;
+// ===========================================
+
 #define GNSS_TIMEOUT (3000)
 #define GNSS_INTERVAL_TIME (1)
 #define SERIAL_BAUDRATE (115200)
@@ -21,7 +36,7 @@
 #define STRING_BUFFER_SIZE (1000)
 #define DC_HISTORY_COUNT (20)  // DC Report Array Length
 
-#define LOG_INTERVAL_MIN (2)  // SD card logging time interval (minute)
+#define LOG_INTERVAL_MIN (1)   // SD card logging time interval (minute)
 #define DCR_INTERVAL_SEC (15)  // SD card text dc report interval (sec)
 
 /* Global Instances */
@@ -47,6 +62,28 @@ bool newfile_flag = 0;
 bool reponse_flag = 0;
 
 int mainboard_start_min = 0;  // time trigger for logging event
+
+// ===========================================
+// * ESP8266
+void esp8266Report(String addr, uint32_t port, const uint8_t *payload, uint32_t payloadLength) {
+  //uint8_t buffer[128] = { 0 };
+
+  if (wifi.createTCP(addr, port)) {
+    Serial.print("create tcp ok\r\n");
+
+    wifi.send(payload, payloadLength);
+
+    if (wifi.releaseTCP()) {
+      Serial.print("release tcp ok\r\n");
+    } else {
+      Serial.print("release tcp err\r\n");
+    }
+
+  } else {
+    Serial.print("create tcp err\r\n");
+  }
+}
+// ===========================================
 
 /* ====================================================== */
 /* Supporting Functions */
@@ -288,8 +325,28 @@ String getDCContent() {
 void setup() {
   /* Initialize Serial */
   Serial.begin(SERIAL_BAUDRATE);
-  /*  */
-  Serial2.begin(SERIAL_BAUDRATE);
+  // ===========================================
+  // * ESP8266
+  wifi.begin(Serial2, 115200);
+
+  Serial.print("Esp8266 FW Version:");
+  Serial.println(wifi.getVersion().c_str());
+
+  if (wifi.setOprToStationSoftAP()) {
+    Serial.print("to station + softap ok\r\n");
+  } else {
+    Serial.print("to station + softap err\r\n");
+  }
+
+  if (wifi.setSoftAPParam(SSID, PASSWORD)) {
+    Serial.print("Create AP success\r\n");
+    Serial.print("IP: ");
+    Serial.println(wifi.getLocalIP().c_str());
+  } else {
+    Serial.print("Create AP failure\r\n");
+  }
+
+  // ===========================================
 
   /* Demo Button : LTE Extension Board: D03 */
   pinMode(PIN_D03, INPUT_PULLUP);
@@ -407,6 +464,10 @@ void loop() {
       strcpy(dc_data, temp_.c_str());
       saveText(filename, dc_data);
       Serial.println("DC Logging on SD ...ok");
+      // ===========================================
+      // * ESP8266
+      esp8266Report(HOST_NAME, HOST_PORT_SATT, (const uint8_t *)dc_data, strlen(dc_data));
+      // ===========================================
     }
   }
 
@@ -414,6 +475,10 @@ void loop() {
   if ((((NavData.time.minute + mainboard_start_min) % LOG_INTERVAL_MIN) == 0) && localtime_flag && newfile_flag) {
     Serial.println("Enter Newfile section: NF");
     String temp_ = getSatRTCDateTime(&NavData);  // datetime as a filename
+    // ===========================================
+    // * ESP8266
+    esp8266Report(HOST_NAME, HOST_PORT_SECTION, (const uint8_t *)temp_.c_str(), temp_.length());
+    // ===========================================
     Serial.println(temp_);
     //String temp_ = getSatUTCDatetime(&NavData);
     // capture & save image
@@ -422,7 +487,12 @@ void loop() {
     filename_image = "image_" + temp_ + ".jpg";
     strcpy(filename, filename_image.c_str());
     saveImg(filename);
-    camCapture(); // discard img buffer, current bug
+
+    // ===========================================
+    // * ESP8266
+    esp8266Report(HOST_NAME, HOST_PORT_CAPTURE, (const uint8_t *)img.getImgBuff(), img.getImgSize());
+    // ===========================================
+    camCapture();  // discard img buffer, current bug
     Serial.println("NF: Image created.");
 
     // create a new report
@@ -431,11 +501,14 @@ void loop() {
     strcpy(dc_data, temp_.c_str());
     saveText(filename, dc_data);
     strcpy(dc_data, getSatLocation(&NavData).c_str());
+    // ===========================================
+    // * ESP8266
+    esp8266Report(HOST_NAME, HOST_PORT_LOCATION, (const uint8_t *)dc_data, strlen(dc_data));
+    // ===========================================
     Serial.println(dc_data);
     saveText(filename, dc_data);
     Serial.println("Report created");
 
     report_flag = 1;  // enable report
   }
-  
 }

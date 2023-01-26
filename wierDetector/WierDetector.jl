@@ -9,11 +9,15 @@ using Images
 using ImageBinarization
 using ImageSegmentation
 using Statistics
+using Distances
 
-import ImageView
+using ImageView
 
-global image_height::Int
-global image_width::Int
+global crop_rowpx = 350:750
+global crop_colpx = 660:800
+
+# Red- threshold value in RGB image
+red_thres = 0.8
 
 function parse_cli()
     s = ArgParseSettings()
@@ -39,57 +43,108 @@ end
 # load a recent image 
 
 function generate_filename()
-    file_list = readdir(input_dir);
+    file_list = readdir(input_dir)
     # list all data file
     # vector of string is sorted, ascending
     if (file_list |> length == 0)
         println("No file!")
-        return "";
+        return ""
     else
         indx_image = findall(x -> occursin("image", x), file_list)[end]
         # indx_report = findall(x -> occursin("report", x), file_list)[end]
 
         ## load image
-        img_filename = joinpath(input_dir, file_list[indx_image])
+        input_img_filename = joinpath(input_dir, file_list[indx_image])
+        output_img_filename = joinpath(output_dir, file_list[indx_image])[1:end-4] * "_p.jpg"
     end
-    return img_filename
+    return input_img_filename, output_img_filename
 end
 
+function find_centerpx(x::Vector{CartesianIndex{2}})
+    rowpx = map(x -> x.I[1], x)
+    colpx = map(x -> x.I[2], x)
 
+    left_row = minimum(rowpx)
+    top_col = minimum(colpx)
+    right_row = maximum(rowpx)
+    bot_col = maximum(colpx)
 
-function process_image(img_filename)
+    cen_row = (left_row + right_row) / 2 |> round |> Int
+    cen_col = (top_col + bot_col) / 2 |> round |> Int
 
-    img = Images.load(img_filename)
+    return CartesianIndex(cen_row, cen_col)
+end
+
+function find_straightness(x::Vector{CartesianIndex{2}})
+    pdist = 0.0 # consecutive pairwise px distance
+    ldist = 1.0 # least L2 distance
+    for i = 2:length(x)
+        pdist += norm((x[i] - x[i-1]).I, 2) # p-2 norm
+    end
+
+    ldist = norm((x[1] - x[end]).I, 2)
+
+    return pdist / ldist
+end
+
+function process_image(input_img_filename, output_img_filename)
+
+    img = Images.load(input_img_filename)
     # ImageView.imshow(img)
 
     # image size
-    global img_height = size(img)[1]
-    global img_width = size(img)[2]
+    img_height = size(img)[1]
+    img_width = size(img)[2]
+
+    # Wier Area 
+    wierAreaMask = zeros(Bool, img_height, img_width)
+    wierAreaMask[crop_rowpx, crop_colpx] .= 1
 
     # preprocess, permute dims to W x H x Channel
     img_copy = Images.channelview(img) |> copy # Channel x W x H 
-    img_hwc = PermutedDimsArray(img_copy, (2, 3, 1)) # H.W.C
-
-    # convert N0f8 to float32 (max=1.0, min=0.0)
-    img_hwc_f32 = Float32.(img_hwc)
-
-    # red channel RGB
-    img_hwc_f32_red = copy(img_hwc_f32)
+    img_hwc_rgb = PermutedDimsArray(img_copy, (2, 3, 1)) # H.W.C # Red-channel
 
     # HSV channel img_HSV.(img)
-    img_hwc_hsv = HSV.(img)
+    # img_hsv = HSV.(img)
+    # img_hwc_hsv = PermutedDimsArray(Images.channelview(img_hsv), (2, 3, 1)) # H.W.C
 
-    # Otsu thresholding  
-    # thres = otsu_threshold(img_hwc_f32_red)
-    img_th = ImageBinarization.binarize(img_hwc_f32_red, Otsu())
+    img_red_wier = img_hwc_rgb[:, :, 1] .* wierAreaMask
+    # ImageView.imshow(img_red_wier)
 
-    # fixed-value thresholding
-    ImageView.imshow(img_th)
+    for i in eachindex(img_red_wier)
+        if img_red_wier[i] >= red_thres
+            img_red_wier[i] = 1
+        else
+            img_red_wier[i] = 0
+        end
+    end
+    # ImageView.imshow(img_red_wier);
 
-    # prefer: Watershed Segmentation 
-    # dist = 1 .- distance_transform(feature_transform(img_th));
+    # save the processed image
+    save(output_img_filename, colorview(Gray, img_red_wier))
+    
+    # label connected components 
+    img_label = label_components(Bool.(img_red_wier))
+    no_label = maximum(img_label)
 
+    # require 2 poles
+    if (no_label < 2)
+        return (-1,-1)
+    end
 
+    # Center px in CartesianIndex of wier pole
+    label_center = CartesianIndex{2}[]
+
+    # put label into difference image 3-dims
+    for i in 1:no_label
+        activepx_label = findall(x -> x == i, img_label)
+        push!(label_center, find_centerpx(activepx_label))
+    end
+
+    poles_position = map(x -> x.I, label_center)
+
+    return label_center, poles_position
+    # output : Vector{CartesianIndex}, Vector{Tuple{Int64, Int64}}
 end
 
 function julia_main()::Cint
@@ -98,9 +153,11 @@ function julia_main()::Cint
     filename_flag = parsed_args["f"]
     info_flag = parsed_args["v"]
 
-    filename = generate_filename();
-    process_image(filename);
-    return 0;
+    input_filename, output_filename = generate_filename()
+    center_cat, poles_px = process_image(input_filename, output_filename)
+
+
+    return 0
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
