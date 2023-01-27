@@ -1,7 +1,7 @@
 module WierDetector
 
-#import Pkg
-#Pkg.activate(".");
+import Pkg
+Pkg.activate(".");
 
 using ArgParse
 using FileIO
@@ -37,8 +37,8 @@ red_thres = 0.8
 #     return parse_args(s)
 # end
 
-#input_dir = "input_data"
-#output_dir = "output_data"
+global input_dir = "input_data/"
+global output_dir = "output_data/"
 
 # load a recent image 
 function generate_filename()
