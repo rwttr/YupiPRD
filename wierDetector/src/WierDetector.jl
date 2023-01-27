@@ -10,7 +10,7 @@ using Images
 # using ImageSegmentation
 using Statistics
 using Printf
-# using ImageView # Debug Only
+using ImageView
 
 global crop_rowpx = 350:750
 global crop_colpx = 660:800

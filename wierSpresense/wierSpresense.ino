@@ -20,13 +20,11 @@
 
 #define SSID "YuPiTeam"
 #define PASSWORD "12345678"
-#define HOST_NAME "192.168.4.3"
-#define HOST_PORT_SECTION (5000)
-#define HOST_PORT_SATT (5002)
-#define HOST_PORT_CAPTURE (5003)
-#define HOST_PORT_LOCATION (5004)
+#define HOST_NAME "192.168.4.2"
+#define HOST_PORT (5000)
 
 ESP8266 wifi;
+
 // ===========================================
 
 #define GNSS_TIMEOUT (3000)
@@ -65,24 +63,89 @@ int mainboard_start_min = 0;  // time trigger for logging event
 
 // ===========================================
 // * ESP8266
-void esp8266Report(String addr, uint32_t port, const uint8_t *payload, uint32_t payloadLength) {
-  //uint8_t buffer[128] = { 0 };
 
-  if (wifi.createTCP(addr, port)) {
+void stuck(String text) {
+  Serial.println(text);
+  while (1) {
+    delay(3000);
+  }
+}
+
+void esp8266UploadImg(String filename, uint8_t * img, uint32_t imgLen) {
+  uint8_t buffer[1024] = { 0 };
+
+  if (wifi.createTCP(HOST_NAME, HOST_PORT)) {
     Serial.print("create tcp ok\r\n");
 
-    wifi.send(payload, payloadLength);
+    String head = "----WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\nContent-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n----WebKitFormBoundary7MA4YWxkTrZu0gW\r\n";
+
+    uint32_t extraLen = head.length() + tail.length();
+    uint32_t totalLen = imgLen + extraLen;
+
+    
+    char line0[] = "POST /capture HTTP/1.1\r\n";
+    wifi.send((const uint8_t *)line0, strlen(line0));
+    String line1 = "Host: " + String(HOST_NAME) + ":" + String(HOST_PORT) + "\r\n";
+    wifi.send((const uint8_t *)line1.c_str(), line1.length());
+    String line2 = "Content-Length: " + String(totalLen) + "\r\n";
+    wifi.send((const uint8_t *)line2.c_str(), line2.length());
+    char line3[] = "Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW\r\n\r\n";
+    wifi.send((const uint8_t *)line3, strlen(line3));
+    wifi.send((const uint8_t *)head.c_str(), head.length());
+  
+    uint8_t *fbBuf = img;
+    size_t fbLen = imgLen;
+    for (size_t n=0; n<fbLen; n=n+1024) {
+      if (n+1024 < fbLen) {
+        wifi.send((const uint8_t *)fbBuf, 1024);
+        fbBuf += 1024;
+      }
+      else if (fbLen%1024>0) {
+        size_t remainder = fbLen%1024;
+        wifi.send((const uint8_t *)fbBuf, remainder);
+      }
+    }   
+    
+    wifi.send((const uint8_t *)tail.c_str(), tail.length());
+
+    uint32_t recvLen = wifi.recv(buffer, sizeof(buffer), 10000);
+    if (recvLen > 0) {
+      Serial.print("Received:[");
+      for (uint32_t i = 0; i < recvLen; i++) {
+        Serial.print((char)buffer[i]);
+      }
+      Serial.print("]\r\n");
+    }
 
     if (wifi.releaseTCP()) {
       Serial.print("release tcp ok\r\n");
     } else {
       Serial.print("release tcp err\r\n");
     }
-
   } else {
     Serial.print("create tcp err\r\n");
   }
 }
+
+// void esp8266Report(String addr, uint32_t port, const uint8_t *payload, uint32_t payloadLength) {
+//   //uint8_t buffer[128] = { 0 };
+
+//   if (wifi.createTCP(addr, port)) {
+//     Serial.print("create tcp ok\r\n");
+
+//     wifi.send(payload, payloadLength);
+
+//     if (wifi.releaseTCP()) {
+//       Serial.print("release tcp ok\r\n");
+//     } else {
+//       Serial.print("release tcp err\r\n");
+//     }
+
+//   } else {
+//     Serial.print("create tcp err\r\n");
+//   }
+// }
 // ===========================================
 
 /* ====================================================== */
@@ -329,22 +392,18 @@ void setup() {
   // * ESP8266
   wifi.begin(Serial2, 115200);
 
-  Serial.print("Esp8266 FW Version:");
-  Serial.println(wifi.getVersion().c_str());
-
-  if (wifi.setOprToStationSoftAP()) {
-    Serial.print("to station + softap ok\r\n");
-  } else {
-    Serial.print("to station + softap err\r\n");
-  }
-
-  if (wifi.setSoftAPParam(SSID, PASSWORD)) {
-    Serial.print("Create AP success\r\n");
-    Serial.print("IP: ");
-    Serial.println(wifi.getLocalIP().c_str());
-  } else {
-    Serial.print("Create AP failure\r\n");
-  }
+  /* WiFi: Restart*/
+  wifi.restart();
+  while (!wifi.kick())
+    ;
+  /* WiFi: Restart*/
+  if (!wifi.setOprToSoftAP()) stuck("WiFi: Error => Change mode AP!");
+  Serial.println("WiFi: Change Mode to AP");
+  if (!wifi.setSoftAPParam(SSID, PASSWORD)) stuck("WiFi: Error => Creatre AP!");
+  Serial.print("WiFi: Create AP ");
+  Serial.print(SSID);
+  Serial.print(", ");
+  Serial.println(PASSWORD);
 
   // ===========================================
 
@@ -466,7 +525,7 @@ void loop() {
       Serial.println("DC Logging on SD ...ok");
       // ===========================================
       // * ESP8266
-      esp8266Report(HOST_NAME, HOST_PORT_SATT, (const uint8_t *)dc_data, strlen(dc_data));
+      // esp8266Report(HOST_NAME, HOST_PORT_SATT, (const uint8_t *)dc_data, strlen(dc_data));
       // ===========================================
     }
   }
@@ -477,7 +536,7 @@ void loop() {
     String temp_ = getSatRTCDateTime(&NavData);  // datetime as a filename
     // ===========================================
     // * ESP8266
-    esp8266Report(HOST_NAME, HOST_PORT_SECTION, (const uint8_t *)temp_.c_str(), temp_.length());
+    // esp8266Report(HOST_NAME, HOST_PORT_SECTION, (const uint8_t *)temp_.c_str(), temp_.length());
     // ===========================================
     Serial.println(temp_);
     //String temp_ = getSatUTCDatetime(&NavData);
@@ -490,7 +549,7 @@ void loop() {
 
     // ===========================================
     // * ESP8266
-    esp8266Report(HOST_NAME, HOST_PORT_CAPTURE, (const uint8_t *)img.getImgBuff(), img.getImgSize());
+    esp8266UploadImg(filename_image, (uint8_t *)img.getImgBuff(), img.getImgSize());
     // ===========================================
     camCapture();  // discard img buffer, current bug
     Serial.println("NF: Image created.");
@@ -503,7 +562,7 @@ void loop() {
     strcpy(dc_data, getSatLocation(&NavData).c_str());
     // ===========================================
     // * ESP8266
-    esp8266Report(HOST_NAME, HOST_PORT_LOCATION, (const uint8_t *)dc_data, strlen(dc_data));
+    // esp8266Report(HOST_NAME, HOST_PORT_LOCATION, (const uint8_t *)dc_data, strlen(dc_data));
     // ===========================================
     Serial.println(dc_data);
     saveText(filename, dc_data);
